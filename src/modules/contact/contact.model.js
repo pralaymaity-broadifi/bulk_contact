@@ -27,6 +27,14 @@ class Contact {
                 'type': String,
                 'required': true,
             },
+            'enrichment': {
+                'jobTitle': {
+                    'type': String
+                },
+                'location': {
+                    'type': String
+                }
+            },
             'createdBy': {
                 'type': Schema.Types.ObjectId,
                 'ref': 'user'

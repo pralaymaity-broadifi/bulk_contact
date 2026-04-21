@@ -11,3 +11,11 @@
 - Provide full-text search with filters (by company, tags, date ranges) using Elasticsearch or MongoDB Atlas Search
 
 ### The interesting challenges: handling partial failures, retry logic, progress tracking (WebSockets + Redis pub/sub), and preventing duplicate job submissions.
+
+
+
+Queue system (BullMQ)
+❌ Job tracking (jobId)
+❌ Progress updates
+❌ Fuzzy matching engine
+❌ Enrichment system
