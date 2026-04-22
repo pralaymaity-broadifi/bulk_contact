@@ -1,7 +1,14 @@
 'use strict';
 const { CalmService } = require( '../../../system/core/CalmService' );
-const fs = require("fs");
-const csv = require("csv-parser");
+// const fs = require("fs");
+// const csv = require("csv-parser");
+const contactQueue = require('../../utils/queue/contactQueue');
+const jobTrackingStore = require("../../utils/queue/jobTrackingStore");
+
+const path = require("path");
+
+
+
 class ContactService extends CalmService {
     // Setting Global Populate to apply in Get All & Get Single
     populateFields = [ { path: 'createdBy' }, { path: 'updatedBy' } ];
@@ -10,59 +17,93 @@ class ContactService extends CalmService {
     }
 
 
-    async processFile(filePath) {
+  // async processFile(filePath) {
 
-    const stream = fs.createReadStream(filePath);
+  //     // Read a file step by step instead of loading everything at once
+  //     const stream = fs.createReadStream(filePath);
 
-    const seen = new Set();
-    let batch = [];
-    const BATCH_SIZE = 500;
+  //     // A special data structure that stores ONLY unique values
+  //     const seen = new Set();
 
-    return new Promise((resolve, reject) => {
+  //     let batch = [];
 
-      stream
-        .pipe(csv())
+  //     const BATCH_SIZE = 500;
 
-        .on("data", async (row) => {
+  //     return new Promise((resolve, reject) => {
 
-          const emailNormalized = row.email?.toLowerCase().trim();
+  //       stream
+  //         .pipe(csv())
 
-          if (seen.has(emailNormalized)) return;
-          seen.add(emailNormalized);
+  //         // .on() means Listen for events
+  //         // .on( "error", "end", "data" ) they are predefined event names
+  //         .on("data", async (row) => {
 
-          batch.push({
-            name: row.name,
-            email: row.email,
-            phone: row.phone,
-            company: row.company,
-            normalizedEmail: emailNormalized
-          });
+  //           const emailNormalized = row.email?.toLowerCase().trim();
 
-          if (batch.length >= BATCH_SIZE) {
-            stream.pause();
-            await this.model.insertMany(batch);
-            batch = [];
-            stream.resume();
-          }
+  //           // If email already exists → skip it
+  //           if (seen.has(emailNormalized)) return;
 
-        })
+  //           seen.add(emailNormalized);
 
-        .on("end", async () => {
+  //           batch.push({
+  //             name: row.name,
+  //             email: row.email,
+  //             phone: row.phone,
+  //             company: row.company,
+  //             normalizedEmail: emailNormalized
+  //           });
 
-          if (batch.length > 0) {
-            await this.model.insertMany(batch);
-          }
+  //           if (batch.length >= BATCH_SIZE) {
+  //             stream.pause();
+  //             await this.model.insertMany(batch);
+  //             batch = [];
+  //             stream.resume();
+  //           }
 
-          resolve({
-            message: "Processed successfully",
-            totalUnique: seen.size
-          });
+  //         })
 
-        })
+  //         .on("end", async () => {
 
-        .on("error", reject);
+  //           if (batch.length > 0) {
+  //             await this.model.insertMany(batch);
+  //           }
 
+  //           resolve({
+  //             message: "Processed successfully",
+  //             totalUnique: seen.size
+  //           });
+
+  //         })
+
+  //         // If file reading fails → stop everything
+  //         .on("error", reject);
+
+  //     });
+  // }
+
+  async processFile(filePath) {
+
+    console.log("SENDING TO QUEUE ====");
+
+    let absoluteFilePath = filePath;
+
+    // ONLY convert if it's NOT absolute
+    if (!path.isAbsolute(filePath)) {
+      absoluteFilePath = path.resolve(filePath);
+    }
+
+    const job = await contactQueue.add('process-contacts', {
+      filePath: absoluteFilePath
     });
+
+    // console.log("JOB CREATED WITH ID:=========", job);
+
+    jobTrackingStore.create(job.id);
+
+    return {
+      jobId: job.id,
+      message: "Processing started"
+    };
   }
 }
 
