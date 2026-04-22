@@ -24,12 +24,11 @@ class ContactController extends CalmController {
 
         const { filePath } = req.body;
 
-        // 🔥 convert to absolute path (IMPORTANT FIX)
+        // convert to absolute path (IMPORTANT FIX)
         const absoluteFilePath = path.join(process.cwd(), filePath);
 
         const result = await this.service.processFile(
-        absoluteFilePath,
-        req.user?.id
+        absoluteFilePath
         );
 
         res.send(result);
@@ -39,25 +38,6 @@ class ContactController extends CalmController {
     }
     }
 
-//      async getJobStatus(req, res, next) {
-//         try {
-//         const { jobId } = req.params;
-
-//         const job = jobTrackingStore.get(jobId);
-
-//         if (!job) {
-//             return res.sendCalmResponse({ message: "Job not found" });
-//         }
-
-//         res.sendCalmResponse({
-//             jobId,
-//             ...job
-//         });
-
-//         } catch (e) {
-//         next(e);
-//         }
-//   }
 
 }
 

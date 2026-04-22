@@ -81,29 +81,30 @@ class ContactService extends CalmService {
   //     });
   // }
 
-async processFile(filePath, userId) {
+  async processFile(filePath) {
 
-  console.log("SENDING TO QUEUE ====");
+    console.log("SENDING TO QUEUE ====");
 
-  let absoluteFilePath = filePath;
+    let absoluteFilePath = filePath;
 
-  // 🔥 ONLY convert if it's NOT absolute
-  if (!path.isAbsolute(filePath)) {
-    absoluteFilePath = path.resolve(filePath);
+    // ONLY convert if it's NOT absolute
+    if (!path.isAbsolute(filePath)) {
+      absoluteFilePath = path.resolve(filePath);
+    }
+
+    const job = await contactQueue.add('process-contacts', {
+      filePath: absoluteFilePath
+    });
+
+    // console.log("JOB CREATED WITH ID:=========", job);
+
+    jobTrackingStore.create(job.id);
+
+    return {
+      jobId: job.id,
+      message: "Processing started"
+    };
   }
-
-  const job = await contactQueue.add('process-contacts', {
-    filePath: absoluteFilePath,
-    userId
-  });
-
-  jobTrackingStore.create(job.id);
-
-  return {
-    jobId: job.id,
-    message: "Processing started"
-  };
-}
 }
 
 module.exports = { ContactService };
