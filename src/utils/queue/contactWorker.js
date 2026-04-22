@@ -12,6 +12,10 @@ const mongoose = require('mongoose');
 
 const { CalmError } = require('../../../system/core/CalmError');
 
+// ✅ IMPORT YOUR SERVICES
+const { isFuzzyDuplicate } = require('./fuzzyMatching');
+const { enrichContact } = require('./enrichData');
+
 const normalizeEmail = (email) => email?.toLowerCase().trim();
 
 const BATCH_SIZE = 25;
@@ -58,10 +62,67 @@ const waitForDB = async () => {
           normalizedEmail: normalizeEmail(row.email || row.Email)
         };
 
+        // ❌ skip invalid rows
         if (!contact.name || !contact.email) return;
 
+        // =====================================================
+        // EXACT DUPLICATE CHECK (FAST)
+        // =====================================================
+        const existing = await ContactModel.findOne({
+          normalizedEmail: contact.normalizedEmail
+        });
+
+        if (existing) {
+          console.log("🔁 SKIPPED EXACT DUPLICATE:", contact.email);
+          return;
+        }
+
+        // =====================================================
+        // FUZZY MATCH CHECK
+        // =====================================================
+        const similarContactsFromDB = await ContactModel.find({
+          company: contact.company
+        }).limit(50); // keep small for performance
+
+        const similarContactsFromBatch = batch.filter(
+          b => b.company === contact.company
+        );
+
+        const similarContacts = [ ...similarContactsFromDB, ...similarContactsFromBatch ];
+
+        console.log("COMPANY CHECK:", contact.company);
+        console.log("SIMILAR FOUND:", similarContacts.length);
+
+        const isDuplicate = isFuzzyDuplicate(contact, similarContacts);
+
+        console.log("🔍 FUZZY RESULT:", {
+          name: contact.name,
+          isDuplicate
+        });
+
+        if (isDuplicate) {
+          console.log("⚠️ FUZZY DUPLICATE:", contact.name);
+          return;
+        }
+
+        // =====================================================
+        // ENRICHMENT
+        // =====================================================
+        try {
+          const enrichedData = await enrichContact();
+          contact.enrichment = enrichedData;
+        } catch (err) {
+          console.log("⚠️ ENRICH FAILED:", contact.email);
+        }
+
+        // =====================================================
+        // ADD TO BATCH
+        // =====================================================
         batch.push(contact);
 
+        // =====================================================
+        // BATCH INSERT
+        // =====================================================
         if (batch.length >= BATCH_SIZE) {
 
           await ContactModel.insertMany(batch);
@@ -93,10 +154,13 @@ const waitForDB = async () => {
 
             stream.on('end', async () => {
               try {
+
                 if (batch.length > 0) {
                   await ContactModel.insertMany(batch);
                   totalProcessed += batch.length;
                 }
+
+                console.log("🎉 FINAL TOTAL:", totalProcessed);
 
                 resolve({ total: totalProcessed });
 
@@ -128,6 +192,8 @@ const waitForDB = async () => {
                   totalProcessed += batch.length;
                   console.log("FINAL BATCH INSERTED:", totalProcessed);
                 }
+
+                console.log("🎉 FINAL TOTAL:", totalProcessed);
 
                 resolve({ total: totalProcessed });
 
