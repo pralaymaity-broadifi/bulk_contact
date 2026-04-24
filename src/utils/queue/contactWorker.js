@@ -12,8 +12,9 @@ const mongoose = require('mongoose');
 
 const { CalmError } = require('../../../system/core/CalmError');
 
-// ✅ IMPORT YOUR SERVICES
-const { isFuzzyDuplicate } = require('./fuzzyMatching');
+
+const { getMatchResult } = require('./fuzzyMatching');
+
 const { enrichContact } = require('./enrichData');
 
 const normalizeEmail = (email) => email?.toLowerCase().trim();
@@ -31,12 +32,14 @@ const waitForDB = async () => {
   });
 };
 
+
 (async () => {
 
   await waitForDB();
 
   const worker = new Worker(
     'contact-queue',
+
     async (job) => {
 
       const { Contact } = require('../../modules/contact/contact.model');
@@ -55,14 +58,16 @@ const waitForDB = async () => {
       const processContact = async (row) => {
 
         const contact = {
+
           name: row.name || row.Name,
           email: row.email || row.Email,
           phone: row.phone || row.Phone,
           company: row.company || row.Company,
           normalizedEmail: normalizeEmail(row.email || row.Email)
+          
         };
 
-        // ❌ skip invalid rows
+        // skip invalid rows
         if (!contact.name || !contact.email) return;
 
         // =====================================================
@@ -73,36 +78,57 @@ const waitForDB = async () => {
         });
 
         if (existing) {
-          console.log("🔁 SKIPPED EXACT DUPLICATE:", contact.email);
+          console.log(" SKIPPED EXACT DUPLICATE:", contact.email);
           return;
         }
 
         // =====================================================
-        // FUZZY MATCH CHECK
+        // FUZZY SCORE ENGINE (NEW SYSTEM)
         // =====================================================
         const similarContactsFromDB = await ContactModel.find({
           company: contact.company
-        }).limit(50); // keep small for performance
+        }).limit(50);
 
+        // also check current batch for similar companies to catch duplicates within the same file
         const similarContactsFromBatch = batch.filter(
           b => b.company === contact.company
         );
 
-        const similarContacts = [ ...similarContactsFromDB, ...similarContactsFromBatch ];
+        // combine both sources for scoring
+        const similarContacts = [
+          ...similarContactsFromDB,
+          ...similarContactsFromBatch
+        ];
 
-        console.log("COMPANY CHECK:", contact.company);
-        console.log("SIMILAR FOUND:", similarContacts.length);
+        const result = getMatchResult(contact, similarContacts);
 
-        const isDuplicate = isFuzzyDuplicate(contact, similarContacts);
-
-        console.log("🔍 FUZZY RESULT:", {
+        console.log(" FUZZY RESULT:", {
           name: contact.name,
-          isDuplicate
+          score: result.score,
+          confidence: result.confidence,
+          action: result.action
         });
 
-        if (isDuplicate) {
-          console.log("⚠️ FUZZY DUPLICATE:", contact.name);
+        // ================= DECISION ENGINE =================
+
+        // HIGH confidence → SKIP
+        if (result.action === "SKIP") {
+          console.log(" HIGH DUPLICATE SKIPPED:", contact.email);
           return;
+        }
+
+        // MEDIUM confidence → FLAG but still insert
+        if (result.action === "FLAG") {
+          contact.duplicateStatus = "POSSIBLE";
+          contact.duplicateScore = result.score;
+          contact.duplicateConfidence = result.confidence;
+        }
+
+        // LOW confidence → normal insert
+        if (result.action === "INSERT") {
+          contact.duplicateStatus = "NONE";
+          contact.duplicateScore = result.score;
+          contact.duplicateConfidence = result.confidence;
         }
 
         // =====================================================
@@ -112,7 +138,7 @@ const waitForDB = async () => {
           const enrichedData = await enrichContact();
           contact.enrichment = enrichedData;
         } catch (err) {
-          console.log("⚠️ ENRICH FAILED:", contact.email);
+          console.log(" ENRICH FAILED:", contact.email);
         }
 
         // =====================================================
@@ -134,6 +160,9 @@ const waitForDB = async () => {
         }
       };
 
+      // =====================================================
+      // FILE PROCESSING LOGIC
+      // =====================================================
       return new Promise((resolve, reject) => {
 
         try {
@@ -186,14 +215,13 @@ const waitForDB = async () => {
                   await processContact(row);
                 }
 
-                // Final batch insert
                 if (batch.length > 0) {
                   await ContactModel.insertMany(batch);
                   totalProcessed += batch.length;
                   console.log("FINAL BATCH INSERTED:", totalProcessed);
                 }
 
-                console.log("🎉 FINAL TOTAL:", totalProcessed);
+                console.log(" FINAL TOTAL:", totalProcessed);
 
                 resolve({ total: totalProcessed });
 

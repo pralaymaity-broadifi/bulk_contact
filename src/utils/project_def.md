@@ -20,8 +20,3 @@
 
 
 
-Queue system (BullMQ)
-❌ Job tracking (jobId)
-❌ Progress updates
-❌ Fuzzy matching engine
-❌ Enrichment system
