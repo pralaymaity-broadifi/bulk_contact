@@ -11,6 +11,6 @@ router.post('/presigned-url', MediaController.getPresignedUrl);
 router.post('/save-file', MediaController.saveFileDetails);
 router.post( '/', MediaController.upload.single( 'file' ), MediaController.insert );
 router.delete( '/:id', MediaController.delete );
-router.post( '/upload-local', MediaController.upload.single( 'file' ), MediaController.localUpload );
+router.post( '/upload-local', MediaController.upload.single( 'file' ), MediaController.uploadChunk );
 
 module.exports = router;

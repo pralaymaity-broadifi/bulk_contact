@@ -3,6 +3,9 @@ const { CalmController } = require( '../../../system/core/CalmController' );
 const { MediaService } = require( './media.service' );
 const { Media } = require( './media.model' );
 const autoBind = require( 'auto-bind' );
+
+const fs = require("fs");
+const path = require("path");
 const multer = require( 'multer' );
 
 const { S3Upload } = require('../../plugins');
@@ -11,6 +14,8 @@ const { CalmError } = require('../../../system/core/CalmError');
 const mediaService = new MediaService(
     new Media().getInstance()
 );
+
+ const { contactQueue } = require('../../utils/queue/contactQueue');
 
 class MediaController extends CalmController {
     // // file upload using multer
@@ -29,20 +34,47 @@ class MediaController extends CalmController {
 
 
     storage = multer.diskStorage({
-        destination: function (req, file, callback) {
-            callback(null, "uploads/"); // local folder
+
+        destination: (req, file, cb) => {
+
+            const { fileName, uploadId } = req.body;
+
+            if (!fileName) {
+                return cb(new Error("fileName missing"), null);
+            }
+
+            if (!uploadId) {
+                return cb(new Error("uploadId missing"), null);
+            }
+
+            const dir = path.join(
+                process.cwd(),
+                "uploads/chunks",
+                uploadId
+            );
+
+            fs.mkdirSync(dir, { recursive: true });
+
+            cb(null, dir);
         },
 
-        filename: function (req, file, callback) {
-            const uniqueName = Date.now() + "-" + file.originalname;
-            callback(null, uniqueName);
+        filename: (req, file, cb) => {
+
+            const { chunkIndex } = req.body;
+
+            if (chunkIndex === undefined) {
+                return cb(new Error("chunkIndex missing"), null);
+            }
+
+            // IMPORTANT: store by index ONLY
+            cb(null, String(chunkIndex));
         }
     });
 
     upload = multer({
         storage: this.storage,
         limits: {
-            fileSize: 1024 * 1024 * 25 // 25MB
+            fileSize: 50 * 1024 * 1024
         }
     });
 
@@ -148,26 +180,111 @@ class MediaController extends CalmController {
         }
     }
 
-    async localUpload(req, res, next) {
+    // ==========================
+    // UPLOAD CHUNK CONTROLLER
+    // ==========================
+    async uploadChunk(req, res) {
         try {
+
+            const { chunkIndex, totalChunks, fileName, uploadId } = req.body;
+
             if (!req.file) {
-                throw new Error("File is required");
+                throw new Error("Chunk file missing");
             }
 
-            // local file path
-            const filePath = req.file.path.replace(/\\/g, "/");
+            console.log(`Received chunk ${chunkIndex}/${totalChunks}`);
 
-            console.log(`File uploaded to ============= ${filePath}`);
+            if (Number(chunkIndex) === Number(totalChunks) - 1) {
 
-            res.send({
-            message: "File uploaded successfully",
-            filePath: filePath,
-            originalName: req.file.originalname
+                const filePath = await this.mergeChunks(
+                    uploadId,
+                    fileName,
+                    totalChunks
+                );
+
+                await contactQueue.add("process-file", {
+                    filePath,
+                    uploadId
+                });
+
+                return res.json({
+                    message: "File uploaded and merged",
+                    filePath
+                });
+            }
+
+            return res.json({
+                message: `Chunk ${chunkIndex} received`
             });
 
-        } catch (e) {
-            next(e);
+        } catch (err) {
+            console.error(err);
+            return res.status(500).send(err.message || "Upload failed");
         }
+    }
+
+
+    // ==========================
+    // MERGE CHUNKS (FIXED)
+    // ==========================
+    async mergeChunks(uploadId, fileName, totalChunks) {
+
+        const chunkDir = path.join(
+            process.cwd(),
+            "uploads/chunks",
+            uploadId
+        );
+
+        const finalFileName = `${uploadId}-${fileName.replace(/\.(csv|xlsx)$/, '')}${path.extname(fileName)}`;
+
+        const finalPath = path.join(
+            process.cwd(),
+            "uploads",
+            finalFileName
+        );
+
+        console.log("📦 MERGING CHUNKS FROM:", chunkDir);
+        console.log("📄 FINAL FILE:", finalPath);
+
+        const writeStream = fs.createWriteStream(finalPath);
+
+        for (let i = 0; i < totalChunks; i++) {
+
+            const chunkPath = path.join(chunkDir, String(i));
+
+            console.log("🔍 Reading chunk:", chunkPath);
+
+            if (!fs.existsSync(chunkPath)) {
+                throw new Error(`Missing chunk: ${i}`);
+            }
+
+            await new Promise((resolve, reject) => {
+
+                const readStream = fs.createReadStream(chunkPath);
+
+                readStream.on("error", reject);
+
+                readStream.on("end", () => {
+                    fs.unlinkSync(chunkPath);
+                    console.log("🧹 Deleted chunk:", i);
+                    resolve();
+                });
+
+                readStream.pipe(writeStream, { end: false });
+            });
+        }
+
+        writeStream.end();
+
+        await new Promise(resolve => writeStream.on("finish", resolve));
+
+        await new Promise(res => setTimeout(res, 500));
+
+        fs.rmSync(chunkDir, { recursive: true, force: true });
+
+        console.log("🎉 MERGE COMPLETE:", finalPath);
+
+        return finalPath;
     }
 
 

@@ -7,11 +7,14 @@ const { Worker } = require('bullmq');
 const connection = require('./redis');
 const fs = require('fs');
 const csv = require('csv-parser');
-const XLSX = require('xlsx');
+
+
+// cSpell:ignore exceljs
+const ExcelJS = require('exceljs');
 const mongoose = require('mongoose');
 
 const { CalmError } = require('../../../system/core/CalmError');
-
+const path = require('path');
 
 const { getMatchResult } = require('./fuzzyMatching');
 
@@ -35,223 +38,168 @@ const waitForDB = async () => {
 
 (async () => {
 
-  await waitForDB();
+    await waitForDB();
 
-  const worker = new Worker(
-    'contact-queue',
+    const worker = new Worker(
+        'contact-queue',
 
-    async (job) => {
+        async (job) => {
 
-      const { Contact } = require('../../modules/contact/contact.model');
-      const ContactModel = new Contact().getInstance();
+            const { Contact } = require('../../modules/contact/contact.model');
+            const ContactModel = new Contact().getInstance();
 
-      console.log("JOB STARTED:", job.id);
+            console.log("JOB STARTED:", job.id);
 
-      const filePath = job.data.filePath;
-      const ext = filePath.split('.').pop();
+            const filePath = job.data.filePath;
+            const ext = path.extname(filePath).replace('.', '');
 
-      console.log("FILE:", filePath);
+            console.log("FILE:", filePath);
 
-      let batch = [];
-      let totalProcessed = 0;
+            let batch = [];
+            let totalProcessed = 0;
 
-      const processContact = async (row) => {
+            const processContact = async (row) => {
 
-        const contact = {
+                const contact = {
+                    name: row.name || row.Name,
+                    email: row.email || row.Email,
+                    phone: row.phone || row.Phone,
+                    company: row.company || row.Company,
+                    normalizedEmail: normalizeEmail(row.email || row.Email)
+                };
 
-          name: row.name || row.Name,
-          email: row.email || row.Email,
-          phone: row.phone || row.Phone,
-          company: row.company || row.Company,
-          normalizedEmail: normalizeEmail(row.email || row.Email)
-          
-        };
+                if (!contact.name || !contact.email) return;
 
-        // skip invalid rows
-        if (!contact.name || !contact.email) return;
+                const existing = await ContactModel.findOne({
+                    normalizedEmail: contact.normalizedEmail
+                });
 
-        // =====================================================
-        // EXACT DUPLICATE CHECK (FAST)
-        // =====================================================
-        const existing = await ContactModel.findOne({
-          normalizedEmail: contact.normalizedEmail
-        });
-
-        if (existing) {
-          console.log(" SKIPPED EXACT DUPLICATE:", contact.email);
-          return;
-        }
-
-        // =====================================================
-        // FUZZY SCORE ENGINE (NEW SYSTEM)
-        // =====================================================
-        const similarContactsFromDB = await ContactModel.find({
-          company: contact.company
-        }).limit(50);
-
-        // also check current batch for similar companies to catch duplicates within the same file
-        const similarContactsFromBatch = batch.filter(
-          b => b.company === contact.company
-        );
-
-        // combine both sources for scoring
-        const similarContacts = [
-          ...similarContactsFromDB,
-          ...similarContactsFromBatch
-        ];
-
-        const result = getMatchResult(contact, similarContacts);
-
-        console.log(" FUZZY RESULT:", {
-          name: contact.name,
-          score: result.score,
-          confidence: result.confidence,
-          action: result.action
-        });
-
-        // ================= DECISION ENGINE =================
-
-        // HIGH confidence → SKIP
-        if (result.action === "SKIP") {
-          console.log(" HIGH DUPLICATE SKIPPED:", contact.email);
-          return;
-        }
-
-        // MEDIUM confidence → FLAG but still insert
-        if (result.action === "FLAG") {
-          contact.duplicateStatus = "POSSIBLE";
-          contact.duplicateScore = result.score;
-          contact.duplicateConfidence = result.confidence;
-        }
-
-        // LOW confidence → normal insert
-        if (result.action === "INSERT") {
-          contact.duplicateStatus = "NONE";
-          contact.duplicateScore = result.score;
-          contact.duplicateConfidence = result.confidence;
-        }
-
-        // =====================================================
-        // ENRICHMENT
-        // =====================================================
-        try {
-          const enrichedData = await enrichContact();
-          contact.enrichment = enrichedData;
-        } catch (err) {
-          console.log(" ENRICH FAILED:", contact.email);
-        }
-
-        // =====================================================
-        // ADD TO BATCH
-        // =====================================================
-        batch.push(contact);
-
-        // =====================================================
-        // BATCH INSERT
-        // =====================================================
-        if (batch.length >= BATCH_SIZE) {
-
-          await ContactModel.insertMany(batch);
-
-          totalProcessed += batch.length;
-          console.log("BATCH INSERTED:", totalProcessed);
-
-          batch = [];
-        }
-      };
-
-      // =====================================================
-      // FILE PROCESSING LOGIC
-      // =====================================================
-      return new Promise((resolve, reject) => {
-
-        try {
-
-          // ================= CSV =================
-          if (ext === 'csv') {
-
-            const stream = fs.createReadStream(filePath).pipe(csv());
-
-            stream.on('data', async (row) => {
-              stream.pause();
-              try {
-                await processContact(row);
-              } finally {
-                stream.resume();
-              }
-            });
-
-            stream.on('end', async () => {
-              try {
-
-                if (batch.length > 0) {
-                  await ContactModel.insertMany(batch);
-                  totalProcessed += batch.length;
+                if (existing) {
+                    console.log("SKIPPED EXACT DUPLICATE:", contact.email);
+                    return;
                 }
 
-                console.log("🎉 FINAL TOTAL:", totalProcessed);
+                const similarContactsFromDB = await ContactModel.find({
+                    company: contact.company
+                }).limit(50);
 
-                resolve({ total: totalProcessed });
+                const similarContactsFromBatch = batch.filter(
+                    b => b.company === contact.company
+                );
 
-              } catch (err) {
-                reject(err);
-              }
-            });
+                const result = getMatchResult(contact, [
+                    ...similarContactsFromDB,
+                    ...similarContactsFromBatch
+                ]);
 
-            stream.on('error', reject);
-          }
+                console.log("FUZZY RESULT ==:", result);
 
-          // ================= XLSX =================
-          else if (ext === 'xlsx') {
+                if (result.action === "SKIP") return;
 
-            const workbook = XLSX.readFile(filePath);
-            const sheet = workbook.Sheets[ workbook.SheetNames[ 0 ] ];
-            const rows = XLSX.utils.sheet_to_json(sheet);
+                if (result.action === "FLAG") {
+                    contact.duplicateStatus = "POSSIBLE";
+                    contact.duplicateScore = result.score;
+                    contact.duplicateConfidence = result.confidence;
+                }
 
-            (async () => {
-              try {
+                if (result.action === "INSERT") {
+                    contact.duplicateStatus = "NONE";
+                    contact.duplicateScore = result.score;
+                    contact.duplicateConfidence = result.confidence;
+                }
+
+                try {
+                    contact.enrichment = await enrichContact();
+                } catch (err) {
+                    console.log("ENRICH FAILED:", contact.email);
+                }
+
+                batch.push(contact);
+
+                if (batch.length >= BATCH_SIZE) {
+
+                    await ContactModel.insertMany(batch);
+
+                    totalProcessed += batch.length;
+                    console.log("BATCH INSERTED:", totalProcessed);
+
+                    batch = [];
+                }
+            };
+
+            // ================= CSV =================
+            if (ext === 'csv') {
+
+                const stream = fs.createReadStream(filePath).pipe(csv());
+
+                await new Promise((resolve, reject) => {
+
+                    stream.on('data', async (row) => {
+                        stream.pause();
+                        try {
+                            await processContact(row);
+                        } finally {
+                            stream.resume();
+                        }
+                    });
+
+                    stream.on('end', resolve);
+                    stream.on('error', reject);
+                });
+
+            }
+
+            // ================= XLSX =================
+            else if (ext === 'xlsx') {
+
+                const workbook = new ExcelJS.Workbook();
+                await workbook.xlsx.readFile(filePath);
+
+                const worksheet = workbook.worksheets[ 0 ];
+
+                const rows = [];
+
+                worksheet.eachRow((row, rowNumber) => {
+                    if (rowNumber === 1) return;
+
+                    rows.push({
+                        name: row.getCell(1).value,
+                        email: row.getCell(2).value,
+                        phone: row.getCell(3).value,
+                        company: row.getCell(4).value
+                    });
+                });
 
                 for (const row of rows) {
-                  await processContact(row);
+                    await processContact(row);
                 }
 
-                if (batch.length > 0) {
-                  await ContactModel.insertMany(batch);
-                  totalProcessed += batch.length;
-                  console.log("FINAL BATCH INSERTED:", totalProcessed);
-                }
+            } else {
+                throw new CalmError("", "Unsupported file format");
+            }
 
-                console.log(" FINAL TOTAL:", totalProcessed);
+            if (batch.length > 0) {
+                await ContactModel.insertMany(batch);
+                totalProcessed += batch.length;
+                console.log("FINAL BATCH INSERTED:", totalProcessed);
+            }
 
-                resolve({ total: totalProcessed });
+            console.log("FINAL TOTAL:", totalProcessed);
 
-              } catch (err) {
-                reject(err);
-              }
-            })();
+            return { total: totalProcessed };
+        },
 
-          } else {
-            reject(new CalmError("", "Unsupported file format"));
-          }
+        { connection }
+    );
 
-        } catch (err) {
-          reject(err);
-        }
+    worker.on('completed', (job) => {
+        console.log("JOB COMPLETED:", job.id);
+    });
 
-      });
+    worker.on('failed', (job, err) => {
+        console.log("JOB FAILED:", job?.id, err.message);
+    });
 
-    },
-    { connection }
-  );
-
-  worker.on('completed', (job) => {
-    console.log("JOB COMPLETED:", job.id);
-  });
-
-  worker.on('failed', (job, err) => {
-    console.log("JOB FAILED:", job?.id, err.message);
-  });
-
-  console.log("🚀 BullMQ Worker Running...");
+    console.log("🚀 BullMQ Worker Running...");
 
 })();

@@ -7,4 +7,4 @@ const contactQueue = new Queue('contact-queue', {
   connection
 });
 
-module.exports = contactQueue;
+module.exports = { contactQueue };
