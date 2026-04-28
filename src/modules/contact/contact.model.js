@@ -25,7 +25,8 @@ class Contact {
             },
             'normalizedEmail': {
                 'type': String,
-                'required': true,
+                'unique': true,
+                'required': true
             },
             'enrichment': {
                 'jobTitle': {

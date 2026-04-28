@@ -11,5 +11,7 @@ A backend system to upload large CSV/XLSX files in chunks, process them asynchro
 -  Background processing using BullMQ worker
 -  Duplicate detection (exact + fuzzy matching)
 -  Batch database insertion (performance optimized)
--  CSV + XLSX file support (Working on it)
--  Automatic cleanup of temporary chunks
+-  Full support for:
+    CSV files (stream + merge)
+    XLSX files (chunk-based row parsing, no file merge)
+    Automatic cleanup of temporary chunk files 

@@ -10,11 +10,11 @@ const csv = require('csv-parser');
 
 
 // cSpell:ignore exceljs
-const ExcelJS = require('exceljs');
+
 const mongoose = require('mongoose');
 
 const { CalmError } = require('../../../system/core/CalmError');
-const path = require('path');
+
 
 const { getMatchResult } = require('./fuzzyMatching');
 
@@ -45,15 +45,33 @@ const waitForDB = async () => {
 
         async (job) => {
 
+            // console.log(" FULL JOB DATA:", JSON.stringify(job.data, null, 2));
+            console.log(`JOB ${job.id} FILE:`, job.data.filePath);
+
             const { Contact } = require('../../modules/contact/contact.model');
             const ContactModel = new Contact().getInstance();
 
-            console.log("JOB STARTED:", job.id);
+
+            // ================= FIX START =================
 
             const filePath = job.data.filePath;
-            const ext = path.extname(filePath).replace('.', '');
+            const rows = job.data.rows;
 
-            console.log("FILE:", filePath);
+             // STRICT TYPE SYSTEM (NO GUESSING)
+            const type = job.data.type;
+
+            const isCSV = type === "csv" && typeof filePath === "string";
+            const isXLSX = type === "xlsx" && Array.isArray(rows);
+
+            // console.log("FILE:", filePath);
+
+            console.log(" DETECTED JOB TYPE:", {
+                type,
+                hasFilePath: !!filePath,
+                hasRows: Array.isArray(rows)
+            });
+
+            // ================= FIX END =================
 
             let batch = [];
             let totalProcessed = 0;
@@ -118,73 +136,77 @@ const waitForDB = async () => {
 
                 if (batch.length >= BATCH_SIZE) {
 
-                    await ContactModel.insertMany(batch);
+                    //  FIX: replaced
+                    await ContactModel.bulkWrite(
+                        batch.map(contacts => ({
+                            updateOne: {
+                                filter: { normalizedEmail: contacts.normalizedEmail },
+                                update: { $setOnInsert: contacts },
+                                upsert: true
+                            }
+                        }))
+                    );
 
                     totalProcessed += batch.length;
-                    console.log("BATCH INSERTED:", totalProcessed);
+                    console.log(`[JOB ${job.id}] BATCH INSERTED:`, totalProcessed);
 
                     batch = [];
                 }
             };
 
-            // ================= CSV =================
-            if (ext === 'csv') {
 
-                const stream = fs.createReadStream(filePath).pipe(csv());
+            if (!isCSV && !isXLSX) {
 
-                await new Promise((resolve, reject) => {
-
-                    stream.on('data', async (row) => {
-                        stream.pause();
-                        try {
-                            await processContact(row);
-                        } finally {
-                            stream.resume();
-                        }
-                    });
-
-                    stream.on('end', resolve);
-                    stream.on('error', reject);
-                });
-
-            }
-
-            // ================= XLSX =================
-            else if (ext === 'xlsx') {
-
-                const workbook = new ExcelJS.Workbook();
-                await workbook.xlsx.readFile(filePath);
-
-                const worksheet = workbook.worksheets[ 0 ];
-
-                const rows = [];
-
-                worksheet.eachRow((row, rowNumber) => {
-                    if (rowNumber === 1) return;
-
-                    rows.push({
-                        name: row.getCell(1).value,
-                        email: row.getCell(2).value,
-                        phone: row.getCell(3).value,
-                        company: row.getCell(4).value
-                    });
-                });
-
-                for (const row of rows) {
-                    await processContact(row);
-                }
-
-            } else {
                 throw new CalmError("", "Unsupported file format");
             }
 
+            // ================= CSV =================
+
+            // Sequential CSV processing (safe + memory efficient, no stream race issues)
+            // chunks → merge file → stream parse → DB
+
+            if (isCSV) {
+
+                const stream = fs.createReadStream(filePath).pipe(csv());
+
+                for await (const row of stream) {
+                    await processContact(row);
+                }
+            }
+
+            // ================= XLSX =================
+
+            // chunks → parse each chunk → combine rows → DB
+            else if (isXLSX) {
+
+                const xlsxRows = job.data.rows; // SAFE FIX
+
+                for (const row of xlsxRows) {
+                    await processContact(row);
+                }
+
+            }
+
+            
+
             if (batch.length > 0) {
-                await ContactModel.insertMany(batch);
+
+                //  FIX:
+                await ContactModel.bulkWrite(
+                    batch.map(contact => ({
+                        updateOne: {
+                            filter: { normalizedEmail: contact.normalizedEmail },
+                            update: { $setOnInsert: contact },
+                            upsert: true
+                        }
+                    }))
+                );
+
                 totalProcessed += batch.length;
                 console.log("FINAL BATCH INSERTED:", totalProcessed);
             }
 
-            console.log("FINAL TOTAL:", totalProcessed);
+            console.log(`[JOB ${job.id}] FINAL TOTAL:`, totalProcessed);
 
             return { total: totalProcessed };
         },

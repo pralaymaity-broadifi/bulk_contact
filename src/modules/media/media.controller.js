@@ -10,7 +10,7 @@ const multer = require( 'multer' );
 
 const { S3Upload } = require('../../plugins');
 const { CalmError } = require('../../../system/core/CalmError');
-
+const ExcelJS = require("exceljs");
 const mediaService = new MediaService(
     new Media().getInstance()
 );
@@ -35,6 +35,7 @@ class MediaController extends CalmController {
 
     storage = multer.diskStorage({
 
+        // destination (where file will be saved)
         destination: (req, file, cb) => {
 
             const { fileName, uploadId } = req.body;
@@ -47,17 +48,22 @@ class MediaController extends CalmController {
                 return cb(new Error("uploadId missing"), null);
             }
 
+            // process.cwd() -> project root folder
+            // root/uploads/chunks/{uploadId}
             const dir = path.join(
                 process.cwd(),
                 "uploads/chunks",
                 uploadId
             );
 
+            // This creates the folder.
             fs.mkdirSync(dir, { recursive: true });
 
+            // This tells multer: "Hey, store the incoming file in this folder"
             cb(null, dir);
         },
 
+        // filename (how file will be named)
         filename: (req, file, cb) => {
 
             const { chunkIndex } = req.body;
@@ -66,7 +72,7 @@ class MediaController extends CalmController {
                 return cb(new Error("chunkIndex missing"), null);
             }
 
-            // IMPORTANT: store by index ONLY
+            // File will be saved as: uploads/chunks/{uploadId}/{chunkIndex}
             cb(null, String(chunkIndex));
         }
     });
@@ -74,7 +80,7 @@ class MediaController extends CalmController {
     upload = multer({
         storage: this.storage,
         limits: {
-            fileSize: 50 * 1024 * 1024
+            fileSize: 50 * 1024 * 1024 // 50MB per chunk
         }
     });
 
@@ -196,16 +202,9 @@ class MediaController extends CalmController {
 
             if (Number(chunkIndex) === Number(totalChunks) - 1) {
 
-                const filePath = await this.mergeChunks(
-                    uploadId,
-                    fileName,
-                    totalChunks
-                );
+                const result = await this.mergeChunks(uploadId, fileName, totalChunks);
 
-                await contactQueue.add("process-file", {
-                    filePath,
-                    uploadId
-                });
+                contactQueue.add("process-file", result);
 
                 return res.json({
                     message: "File uploaded and merged",
@@ -235,7 +234,9 @@ class MediaController extends CalmController {
             uploadId
         );
 
-        const finalFileName = `${uploadId}-${fileName.replace(/\.(csv|xlsx)$/, '')}${path.extname(fileName)}`;
+        const ext = path.extname(fileName);
+
+        const finalFileName = `${uploadId}-${fileName.replace(/\.(csv|xlsx)$/, '')}${ext}`;
 
         const finalPath = path.join(
             process.cwd(),
@@ -243,51 +244,98 @@ class MediaController extends CalmController {
             finalFileName
         );
 
-        console.log("📦 MERGING CHUNKS FROM:", chunkDir);
-        console.log("📄 FINAL FILE:", finalPath);
+        console.log(" MERGING CHUNKS FROM:", chunkDir);
 
-        const writeStream = fs.createWriteStream(finalPath);
+        // =========================
+        //  CSV → MERGE FILE
+        // =========================
+        if (ext === '.csv') {
 
-        for (let i = 0; i < totalChunks; i++) {
+            // stream means “data is processed in small parts continuously instead of loading everything at once.”
+            const writeStream = fs.createWriteStream(finalPath);
 
-            const chunkPath = path.join(chunkDir, String(i));
+            for (let i = 0; i < totalChunks; i++) {
 
-            console.log("🔍 Reading chunk:", chunkPath);
+                const chunkPath = path.join(chunkDir, String(i));
 
-            if (!fs.existsSync(chunkPath)) {
-                throw new Error(`Missing chunk: ${i}`);
+                if (!fs.existsSync(chunkPath)) {
+                    throw new Error(`Missing chunk: ${i}`);
+                }
+
+                await new Promise((resolve, reject) => {
+
+                    const readStream = fs.createReadStream(chunkPath);
+
+                    readStream.on("error", reject);
+
+                    readStream.on("end", () => {
+                        fs.unlinkSync(chunkPath);
+                        resolve();
+                    });
+
+                    readStream.pipe(writeStream, { end: false });
+                });
             }
 
-            await new Promise((resolve, reject) => {
+            writeStream.end();
 
-                const readStream = fs.createReadStream(chunkPath);
+            await new Promise(resolve => writeStream.on("finish", resolve));
 
-                readStream.on("error", reject);
+            fs.rmSync(chunkDir, { recursive: true, force: true });
 
-                readStream.on("end", () => {
-                    fs.unlinkSync(chunkPath);
-                    console.log("🧹 Deleted chunk:", i);
-                    resolve();
-                });
+            console.log("🎉 CSV MERGE COMPLETE:", finalPath);
 
-                readStream.pipe(writeStream, { end: false });
-            });
+            return { type: "csv", filePath: finalPath };
         }
 
-        writeStream.end();
+        // =========================
+        //  XLSX → DO NOT MERGE FILE
+        // =========================
+        else if (ext === '.xlsx') {
 
-        await new Promise(resolve => writeStream.on("finish", resolve));
+            console.log(" XLSX detected → parsing chunks instead of merging");
 
-        await new Promise(res => setTimeout(res, 500));
+            const allRows = [];
 
-        fs.rmSync(chunkDir, { recursive: true, force: true });
+            const chunks = fs.readdirSync(chunkDir).sort((a, b) => Number(a) - Number(b));
 
-        console.log("🎉 MERGE COMPLETE:", finalPath);
+            for (const chunk of chunks) {
 
-        return finalPath;
+                const chunkPath = path.join(chunkDir, chunk);
+
+                console.log("🔍 Parsing XLSX chunk:", chunkPath);
+
+                const workbook = new ExcelJS.Workbook();
+                await workbook.xlsx.readFile(chunkPath);
+
+                const worksheet = workbook.worksheets[ 0 ];
+
+                worksheet.eachRow((row, index) => {
+
+                    if (index === 1) return; // skip header
+
+                    allRows.push({
+                        name: row.getCell(1).value,
+                        email: row.getCell(2).value,
+                        phone: row.getCell(3).value,
+                        company: row.getCell(4).value
+                    });
+                });
+
+                fs.unlinkSync(chunkPath);
+            }
+
+            fs.rmSync(chunkDir, { recursive: true, force: true });
+
+            console.log("🎉 XLSX PARSE COMPLETE. TOTAL ROWS:", allRows.length);
+
+            return { type: "xlsx", rows: allRows };
+        }
+
+        throw new Error("Unsupported file type");
+        }
+
+
     }
-
-
-}
 
 module.exports = new MediaController( mediaService );
