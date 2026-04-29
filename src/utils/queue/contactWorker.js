@@ -8,16 +8,11 @@ const connection = require('./redis');
 const fs = require('fs');
 const csv = require('csv-parser');
 
-
-// cSpell:ignore exceljs
-
 const mongoose = require('mongoose');
 
 const { CalmError } = require('../../../system/core/CalmError');
 
-
 const { getMatchResult } = require('./fuzzyMatching');
-
 const { enrichContact } = require('./enrichData');
 
 const normalizeEmail = (email) => email?.toLowerCase().trim();
@@ -35,7 +30,6 @@ const waitForDB = async () => {
   });
 };
 
-
 (async () => {
 
     await waitForDB();
@@ -45,25 +39,20 @@ const waitForDB = async () => {
 
         async (job) => {
 
-            // console.log(" FULL JOB DATA:", JSON.stringify(job.data, null, 2));
             console.log(`JOB ${job.id} FILE:`, job.data.filePath);
 
             const { Contact } = require('../../modules/contact/contact.model');
             const ContactModel = new Contact().getInstance();
-
 
             // ================= FIX START =================
 
             const filePath = job.data.filePath;
             const rows = job.data.rows;
 
-             // STRICT TYPE SYSTEM (NO GUESSING)
             const type = job.data.type;
 
             const isCSV = type === "csv" && typeof filePath === "string";
             const isXLSX = type === "xlsx" && Array.isArray(rows);
-
-            // console.log("FILE:", filePath);
 
             console.log(" DETECTED JOB TYPE:", {
                 type,
@@ -75,6 +64,13 @@ const waitForDB = async () => {
 
             let batch = [];
             let totalProcessed = 0;
+
+            //  NEW: DB tracking counters
+            let totalInserted = 0;
+            let totalSkipped = 0;
+
+            //  NEW: batch cache by company (performance fix)
+            const batchCompanyMap = new Map();
 
             const processContact = async (row) => {
 
@@ -94,6 +90,7 @@ const waitForDB = async () => {
 
                 if (existing) {
                     console.log("SKIPPED EXACT DUPLICATE:", contact.email);
+                    totalSkipped++;
                     return;
                 }
 
@@ -101,9 +98,7 @@ const waitForDB = async () => {
                     company: contact.company
                 }).limit(50);
 
-                const similarContactsFromBatch = batch.filter(
-                    b => b.company === contact.company
-                );
+                const similarContactsFromBatch = batchCompanyMap.get(contact.company) || [];
 
                 const result = getMatchResult(contact, [
                     ...similarContactsFromDB,
@@ -112,7 +107,10 @@ const waitForDB = async () => {
 
                 console.log("FUZZY RESULT ==:", result);
 
-                if (result.action === "SKIP") return;
+                if (result.action === "SKIP") {
+                    totalSkipped++;
+                    return;
+                }
 
                 if (result.action === "FLAG") {
                     contact.duplicateStatus = "POSSIBLE";
@@ -134,10 +132,15 @@ const waitForDB = async () => {
 
                 batch.push(contact);
 
+                batchCompanyMap.set(
+                    contact.company,
+                    (batchCompanyMap.get(contact.company) || []).concat(contact)
+                );
+
+                console.log(" CURRENT BATCH SIZE:", batch.length);
                 if (batch.length >= BATCH_SIZE) {
 
-                    //  FIX: replaced
-                    await ContactModel.bulkWrite(
+                    const resultDB = await ContactModel.bulkWrite(
                         batch.map(contacts => ({
                             updateOne: {
                                 filter: { normalizedEmail: contacts.normalizedEmail },
@@ -147,24 +150,33 @@ const waitForDB = async () => {
                         }))
                     );
 
-                    totalProcessed += batch.length;
-                    console.log(`[JOB ${job.id}] BATCH INSERTED:`, totalProcessed);
+                    //  REAL DB INFO
+                    console.log("BULK RESULT:", {
+                        inserted: resultDB.upsertedCount,
+                        matched: resultDB.matchedCount,
+                        modified: resultDB.modifiedCount
+                    });
+
+                    totalInserted += resultDB.upsertedCount;
+                    totalProcessed += resultDB.upsertedCount;
+
+                    console.log(`[JOB ${job.id}] BATCH SUMMARY:`, {
+                        batchSize: batch.length,
+                        inserted: resultDB.upsertedCount,
+                        skippedDuplicates: batch.length - resultDB.upsertedCount,
+                        totalInsertedSoFar: totalInserted
+                    });
 
                     batch = [];
+                    batchCompanyMap.clear();
                 }
             };
 
-
             if (!isCSV && !isXLSX) {
-
                 throw new CalmError("", "Unsupported file format");
             }
 
             // ================= CSV =================
-
-            // Sequential CSV processing (safe + memory efficient, no stream race issues)
-            // chunks → merge file → stream parse → DB
-
             if (isCSV) {
 
                 const stream = fs.createReadStream(filePath).pipe(csv());
@@ -175,24 +187,19 @@ const waitForDB = async () => {
             }
 
             // ================= XLSX =================
-
-            // chunks → parse each chunk → combine rows → DB
             else if (isXLSX) {
 
-                const xlsxRows = job.data.rows; // SAFE FIX
+                const xlsxRows = job.data.rows;
 
                 for (const row of xlsxRows) {
                     await processContact(row);
                 }
-
             }
 
-            
-
+            // ================= FINAL FLUSH =================
             if (batch.length > 0) {
 
-                //  FIX:
-                await ContactModel.bulkWrite(
+                const result = await ContactModel.bulkWrite(
                     batch.map(contact => ({
                         updateOne: {
                             filter: { normalizedEmail: contact.normalizedEmail },
@@ -202,11 +209,30 @@ const waitForDB = async () => {
                     }))
                 );
 
-                totalProcessed += batch.length;
-                console.log("FINAL BATCH INSERTED:", totalProcessed);
+                console.log("FINAL BULK RESULT:", {
+                    inserted: result.upsertedCount,
+                    matched: result.matchedCount
+                });
+
+                totalInserted += result.upsertedCount;
+                totalProcessed += result.upsertedCount;
+
+                console.log("FINAL BATCH SUMMARY:", {
+                    batchSize: batch.length,
+                    inserted: result.upsertedCount,
+                    skipped: batch.length - result.upsertedCount,
+                    totalInsertedSoFar: totalInserted
+                });
             }
 
+            // ================= FINAL LOG =================
             console.log(`[JOB ${job.id}] FINAL TOTAL:`, totalProcessed);
+
+            console.log("🔥 FINAL REPORT:", {
+                totalInserted,
+                totalSkipped,
+                totalProcessed
+            });
 
             return { total: totalProcessed };
         },

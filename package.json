@@ -36,7 +36,9 @@
     "mongoose": "^8.15.0",
     "mongoose-unique-validator": "^4.0.0",
     "multer": "^2.0.0",
+    "npm": "^11.13.0",
     "pluralize": "^8.0.0",
+    "talisman": "^1.1.4",
     "uuid": "^8.3.2",
     "xlsx": "^0.18.5"
   },

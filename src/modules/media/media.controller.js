@@ -208,7 +208,8 @@ class MediaController extends CalmController {
 
                 return res.json({
                     message: "File uploaded and merged",
-                    filePath
+                    filePath: result.filePath,
+                    type: result.type
                 });
             }
 
