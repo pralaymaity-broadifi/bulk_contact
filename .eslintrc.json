@@ -70,7 +70,6 @@
         "no-new-require": 2,
         "array-bracket-spacing": [ 2, "always" ],
         "block-spacing": [ 2, "always" ],
-        "brace-style": [ 2, "1tbs", { "allowSingleLine": false } ],
         "camelcase": [ 2, { "properties": "always" } ],
         "comma-spacing": [ 2, { "before": false, "after": true } ],
         "comma-style": [ 2, "last" ],
@@ -110,6 +109,7 @@
         "no-undef": "off",
         "no-extra-semi": "off",
         "prefer-template": "off",
-        "no-multiple-empty-lines": "off"
+        "no-multiple-empty-lines": "off",
+        "brace-style": "off"
     }
 }
