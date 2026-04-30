@@ -4,7 +4,8 @@ require('dotenv').config();
 require('../../../system/configs/database');
 
 const { Worker } = require('bullmq');
-const connection = require('./redis');
+const { redisConnectionOptions } = require('../redis');
+const redis = require('../redis');
 const fs = require('fs');
 const csv = require('csv-parser');
 
@@ -150,6 +151,11 @@ const waitForDB = async () => {
                         }))
                     );
 
+
+                    await redis.deleteByPattern('contact:*');
+
+                    console.log(" CACHE CLEARED AFTER BATCH INSERT");
+
                     //  REAL DB INFO
                     console.log("BULK RESULT:", {
                         inserted: resultDB.upsertedCount,
@@ -209,6 +215,11 @@ const waitForDB = async () => {
                     }))
                 );
 
+
+                await redis.deleteByPattern('contact:*');
+
+                console.log(" CACHE CLEARED AFTER BATCH INSERT");
+
                 console.log("FINAL BULK RESULT:", {
                     inserted: result.upsertedCount,
                     matched: result.matchedCount
@@ -237,7 +248,7 @@ const waitForDB = async () => {
             return { total: totalProcessed };
         },
 
-        { connection }
+        { connection: redisConnectionOptions }
     );
 
     worker.on('completed', (job) => {

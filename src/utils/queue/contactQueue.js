@@ -1,10 +1,10 @@
 'use strict';
 
 const { Queue } = require('bullmq');
-const connection = require('./redis');
+const { redisConnectionOptions } = require('../redis');
 
 const contactQueue = new Queue('contact-queue', {
-  connection
+  connection: redisConnectionOptions
 });
 
 module.exports = { contactQueue };

@@ -20,22 +20,43 @@ class ContactController extends CalmController {
     }
 
     async processFile(req, res, next) {
-    try {
+        try {
 
-        const { filePath } = req.body;
+            const { filePath } = req.body;
 
-        // convert to absolute path (IMPORTANT FIX)
-        const absoluteFilePath = path.join(process.cwd(), filePath);
+            // convert to absolute path (IMPORTANT FIX)
+            const absoluteFilePath = path.join(process.cwd(), filePath);
 
-        const result = await this.service.processFile(
-        absoluteFilePath
-        );
+            const result = await this.service.processFile(
+            absoluteFilePath
+            );
 
-        res.send(result);
+            res.send(result);
 
-    } catch (e) {
-        next(e);
+        } catch (e) {
+            next(e);
+        }
     }
+
+    async getAll( req, res, next ) {
+        try {
+            const response = await this.service.getAll( req.query );
+            res.sendCalmResponse( response.data.map( x => new this.dto.GetDTO( x ) ), { 'totalCount': response.total } );
+        } catch ( e ) {
+            next( e );
+        }
+    }
+
+    async get( req, res, next ) {
+        const { id } = req.params;
+
+        try {
+            const response = await this.service.get( id );
+
+            res.sendCalmResponse( new this.dto.GetDTO( response.data ) );
+        } catch ( e ) {
+            next( e );
+        }
     }
 
 

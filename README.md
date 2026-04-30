@@ -15,3 +15,12 @@ A backend system to upload large CSV/XLSX files in chunks, process them asynchro
     CSV files (stream + merge)
     XLSX files (chunk-based row parsing, no file merge)
     Automatic cleanup of temporary chunk files 
+
+
+#  Redis Integration
+
+-  Caching for API responses (get / getAll contacts)
+-  Cache invalidation after bulk insert
+-  Reduce MongoDB load for repeated queries
+-  Fast response for frequently accessed data
+-  Queue-ready Redis connection (BullMQ support)

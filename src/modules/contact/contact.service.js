@@ -4,6 +4,7 @@ const { CalmService } = require( '../../../system/core/CalmService' );
 // const csv = require("csv-parser");
 const contactQueue = require('../../utils/queue/contactQueue');
 const jobTrackingStore = require("../../utils/queue/jobTrackingStore");
+const cacheWrapper = require('../../utils/cache/cacheWrapper');
 
 const path = require("path");
 
@@ -17,69 +18,84 @@ class ContactService extends CalmService {
     }
 
 
-  // async processFile(filePath) {
 
-  //     // Read a file step by step instead of loading everything at once
-  //     const stream = fs.createReadStream(filePath);
+    async get(id, ops = {}) {
 
-  //     // A special data structure that stores ONLY unique values
-  //     const seen = new Set();
+      let populateFields = this.populateFields;
 
-  //     let batch = [];
+      if (Array.isArray(ops.populateFields)) {
 
-  //     const BATCH_SIZE = 500;
+          populateFields = ops.populateFields;
 
-  //     return new Promise((resolve, reject) => {
+      }
 
-  //       stream
-  //         .pipe(csv())
+      const cacheKey = `contact:get:${id}`;
 
-  //         // .on() means Listen for events
-  //         // .on( "error", "end", "data" ) they are predefined event names
-  //         .on("data", async (row) => {
+      return await cacheWrapper(cacheKey, async () => {
 
-  //           const emailNormalized = row.email?.toLowerCase().trim();
+          const item = await this.model.findById(id).populate(populateFields);
 
-  //           // If email already exists → skip it
-  //           if (seen.has(emailNormalized)) return;
+          if (!item) {
+              throw new Error('NOT_FOUND_ERROR');
+          }
 
-  //           seen.add(emailNormalized);
+          return { data: item.toJSON() };
 
-  //           batch.push({
-  //             name: row.name,
-  //             email: row.email,
-  //             phone: row.phone,
-  //             company: row.company,
-  //             normalizedEmail: emailNormalized
-  //           });
+      });
+    }
 
-  //           if (batch.length >= BATCH_SIZE) {
-  //             stream.pause();
-  //             await this.model.insertMany(batch);
-  //             batch = [];
-  //             stream.resume();
-  //           }
+    async getAll(query, ops = {}) {
 
-  //         })
+        let populateFields = this.populateFields;
 
-  //         .on("end", async () => {
+        if (Array.isArray(ops.populateFields)) {
+            populateFields = ops.populateFields;
+        }
 
-  //           if (batch.length > 0) {
-  //             await this.model.insertMany(batch);
-  //           }
+        // =========================
+        // SAFE DESTRUCTURING
+        // =========================
+        const { skip, limit, sortBy, ...restQuery } = query;
 
-  //           resolve({
-  //             message: "Processed successfully",
-  //             totalUnique: seen.size
-  //           });
+        const finalSkip = skip ? Number(skip) : 0;
+        const finalLimit = limit ? Number(limit) : 10;
+        const finalSort = sortBy ? sortBy : { createdAt: -1 };
 
-  //         })
+        // =========================
+        // CACHE KEY (based on query + pagination + sort)
+        // =========================
+        const cacheKey = `contact:list:${JSON.stringify({
+            restQuery,
+            skip: finalSkip,
+            limit: finalLimit,
+            sortBy: finalSort
+        })}`;
 
-  //         // If file reading fails → stop everything
-  //         .on("error", reject);
+        // =========================
+        // CACHE WRAPPER
+        // =========================
+        return await cacheWrapper(cacheKey, async () => {
 
-  //     });
-  // }
+            const items = await this.model
+                .find(restQuery)
+                .sort(finalSort)
+                .skip(finalSkip)
+                .limit(finalLimit)
+                .populate(populateFields);
+
+            const total = await this.model.countDocuments(restQuery);
+
+            return {
+                data: this.parseObj(items),
+                total
+                
+            };
+        });
+    }
+
+    
+
+  
 
   async processFile(filePath) {
 
