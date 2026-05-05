@@ -25,7 +25,32 @@ class Contact {
             },
             'normalizedEmail': {
                 'type': String,
-                'required': true,
+                'unique': true,
+                'required': true
+            },
+            'enrichment': {
+                'jobTitle': {
+                    'type': String
+                },
+                'location': {
+                    'type': String
+                }
+            },
+            'duplicateScore': {
+                'type': Number,
+                'default': 0
+            },
+
+            'duplicateConfidence': {
+                'type': String,
+                'enum': [ 'LOW', 'MEDIUM', 'HIGH' ],
+                'default': 'LOW'
+            },
+
+            'duplicateStatus': {
+                'type': String,
+                'enum': [ 'NONE', 'POSSIBLE', 'SKIPPED' ],
+                'default': 'NONE'
             },
             'createdBy': {
                 'type': Schema.Types.ObjectId,

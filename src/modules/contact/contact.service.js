@@ -1,7 +1,15 @@
 'use strict';
 const { CalmService } = require( '../../../system/core/CalmService' );
-const fs = require("fs");
-const csv = require("csv-parser");
+// const fs = require("fs");
+// const csv = require("csv-parser");
+const contactQueue = require('../../utils/queue/contactQueue');
+const jobTrackingStore = require("../../utils/queue/jobTrackingStore");
+const cacheWrapper = require('../../utils/cache/cacheWrapper');
+
+const path = require("path");
+
+
+
 class ContactService extends CalmService {
     // Setting Global Populate to apply in Get All & Get Single
     populateFields = [ { path: 'createdBy' }, { path: 'updatedBy' } ];
@@ -10,59 +18,108 @@ class ContactService extends CalmService {
     }
 
 
-    async processFile(filePath) {
 
-    const stream = fs.createReadStream(filePath);
+    async get(id, ops = {}) {
 
-    const seen = new Set();
-    let batch = [];
-    const BATCH_SIZE = 500;
+      let populateFields = this.populateFields;
 
-    return new Promise((resolve, reject) => {
+      if (Array.isArray(ops.populateFields)) {
 
-      stream
-        .pipe(csv())
+          populateFields = ops.populateFields;
 
-        .on("data", async (row) => {
+      }
 
-          const emailNormalized = row.email?.toLowerCase().trim();
+      const cacheKey = `contact:get:${id}`;
 
-          if (seen.has(emailNormalized)) return;
-          seen.add(emailNormalized);
+      return await cacheWrapper(cacheKey, async () => {
 
-          batch.push({
-            name: row.name,
-            email: row.email,
-            phone: row.phone,
-            company: row.company,
-            normalizedEmail: emailNormalized
-          });
+          const item = await this.model.findById(id).populate(populateFields);
 
-          if (batch.length >= BATCH_SIZE) {
-            stream.pause();
-            await this.model.insertMany(batch);
-            batch = [];
-            stream.resume();
+          if (!item) {
+              throw new Error('NOT_FOUND_ERROR');
           }
 
-        })
+          return { data: item.toJSON() };
 
-        .on("end", async () => {
+      });
+    }
 
-          if (batch.length > 0) {
-            await this.model.insertMany(batch);
-          }
+    async getAll(query, ops = {}) {
 
-          resolve({
-            message: "Processed successfully",
-            totalUnique: seen.size
-          });
+        let populateFields = this.populateFields;
 
-        })
+        if (Array.isArray(ops.populateFields)) {
+            populateFields = ops.populateFields;
+        }
 
-        .on("error", reject);
+        // =========================
+        // SAFE DESTRUCTURING
+        // =========================
+        const { skip, limit, sortBy, ...restQuery } = query;
 
+        const finalSkip = skip ? Number(skip) : 0;
+        const finalLimit = limit ? Number(limit) : 10;
+        const finalSort = sortBy ? sortBy : { createdAt: -1 };
+
+        // =========================
+        // CACHE KEY (based on query + pagination + sort)
+        // =========================
+        const cacheKey = `contact:list:${JSON.stringify({
+            restQuery,
+            skip: finalSkip,
+            limit: finalLimit,
+            sortBy: finalSort
+        })}`;
+
+        // =========================
+        // CACHE WRAPPER
+        // =========================
+        return await cacheWrapper(cacheKey, async () => {
+
+            const items = await this.model
+                .find(restQuery)
+                .sort(finalSort)
+                .skip(finalSkip)
+                .limit(finalLimit)
+                .populate(populateFields);
+
+            const total = await this.model.countDocuments(restQuery);
+
+            return {
+                data: this.parseObj(items),
+                total
+                
+            };
+        });
+    }
+
+    
+
+  
+
+  async processFile(filePath) {
+
+    console.log("SENDING TO QUEUE ====");
+
+    let absoluteFilePath = filePath;
+
+    // ONLY convert if it's NOT absolute
+    if (!path.isAbsolute(filePath)) {
+      absoluteFilePath = path.resolve(filePath);
+    }
+
+    const job = await contactQueue.add('process-contacts', {
+      filePath: absoluteFilePath
     });
+
+    // console.log("JOB CREATED WITH ID:=========", job);
+
+    jobTrackingStore.create(job.id);
+
+    return {
+      jobId: job.id,
+      message: "Processing started"
+    };
   }
 }
 

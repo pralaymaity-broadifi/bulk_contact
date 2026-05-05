@@ -8,6 +8,10 @@ class GetDTO {
         this.phone = props.phone;
         this.company = props.company;
         this.normalizedEmail = props.normalizedEmail;
+        this.duplicateStatus = props.duplicateStatus;
+        this.duplicateScore = props.duplicateScore;
+        this.duplicateConfidence = props.duplicateConfidence;
+        this.enrichment = props.enrichment;
 
         // Auto Generated Fields
         this.createdBy = props.createdBy;
