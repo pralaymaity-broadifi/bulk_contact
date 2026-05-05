@@ -200,10 +200,12 @@ class MediaController extends CalmController {
 
             console.log(`Received chunk ${chunkIndex}/${totalChunks}`);
 
+            // After receiving the last chunk, we merge all chunks into one file
             if (Number(chunkIndex) === Number(totalChunks) - 1) {
 
                 const result = await this.mergeChunks(uploadId, fileName, totalChunks);
 
+                // Add job to queue for further processing
                 contactQueue.add("process-file", result);
 
                 return res.json({
@@ -229,16 +231,21 @@ class MediaController extends CalmController {
     // ==========================
     async mergeChunks(uploadId, fileName, totalChunks) {
 
+        // ( Build ) This is the folder path where all chunks are stored: uploads/chunks/{uploadId}
+        // process.cwd() -> current working directory
         const chunkDir = path.join(
             process.cwd(),
             "uploads/chunks",
             uploadId
         );
 
+        // Get file extensionn (e.g., .csv or .xlsx)
         const ext = path.extname(fileName);
 
+        // Final file name after merging (e.g., {uploadId}-originalFileName.csv)
         const finalFileName = `${uploadId}-${fileName.replace(/\.(csv|xlsx)$/, '')}${ext}`;
 
+        // Final path where merged file will be stored: uploads/{finalFileName}
         const finalPath = path.join(
             process.cwd(),
             "uploads",
@@ -253,35 +260,50 @@ class MediaController extends CalmController {
         if (ext === '.csv') {
 
             // stream means “data is processed in small parts continuously instead of loading everything at once.”
+            // Opens a new empty file where final merged data will go
             const writeStream = fs.createWriteStream(finalPath);
 
             for (let i = 0; i < totalChunks; i++) {
 
+                // This is the path of each chunk: uploads/chunks/{uploadId}/{chunkIndex}
                 const chunkPath = path.join(chunkDir, String(i));
 
+                // Check if chunk file exists before trying to read it
                 if (!fs.existsSync(chunkPath)) {
                     throw new Error(`Missing chunk: ${i}`);
                 }
 
+
+                // Read + write chunk will start
+
+
+                // Wait for each chunk to be fully read and written before moving to the next one
                 await new Promise((resolve, reject) => {
 
+                    // Read each chunk as a stream and pipe it to the write stream
                     const readStream = fs.createReadStream(chunkPath);
 
+                    // If any error occurs during reading or writing, we reject the promise
                     readStream.on("error", reject);
 
+                    // When the chunk is fully read and piped, we resolve the promise to move to the next chunk
                     readStream.on("end", () => {
                         fs.unlinkSync(chunkPath);
                         resolve();
                     });
 
+                    // Adds chunk into final file (without closing it)
                     readStream.pipe(writeStream, { end: false });
                 });
             }
 
+            // Close final file after all chunks are piped
             writeStream.end();
 
+            // Wait until the write stream is fully finished
             await new Promise(resolve => writeStream.on("finish", resolve));
 
+            // Remove chunk directory after merging
             fs.rmSync(chunkDir, { recursive: true, force: true });
 
             console.log("🎉 CSV MERGE COMPLETE:", finalPath);
@@ -298,24 +320,31 @@ class MediaController extends CalmController {
 
             const allRows = [];
 
+            // Get chunk files in order (0, 1, 2, ...) from the chunk directory
             const chunks = fs.readdirSync(chunkDir).sort((a, b) => Number(a) - Number(b));
+
 
             for (const chunk of chunks) {
 
+                // This is the path of each chunk: uploads/chunks/{uploadId}/{chunkIndex}
                 const chunkPath = path.join(chunkDir, chunk);
 
                 console.log("🔍 Parsing XLSX chunk:", chunkPath);
 
+                // Read each chunk using ExcelJS and extract rows
                 const workbook = new ExcelJS.Workbook();
                 await workbook.xlsx.readFile(chunkPath);
 
+                // Assuming data is in the first worksheet
                 const worksheet = workbook.worksheets[ 0 ];
 
+                
                 worksheet.eachRow((row, index) => {
 
                     if (index === 1) return; // skip header
 
                     allRows.push({
+                        // Extract data from each cell
                         name: row.getCell(1).value,
                         email: row.getCell(2).value,
                         phone: row.getCell(3).value,
@@ -323,9 +352,11 @@ class MediaController extends CalmController {
                     });
                 });
 
+                // Remove chunk file after parsing
                 fs.unlinkSync(chunkPath);
             }
 
+            // Remove chunk directory after processing all chunks
             fs.rmSync(chunkDir, { recursive: true, force: true });
 
             console.log("🎉 XLSX PARSE COMPLETE. TOTAL ROWS:", allRows.length);
@@ -334,9 +365,9 @@ class MediaController extends CalmController {
         }
 
         throw new Error("Unsupported file type");
-        }
-
-
     }
+
+
+}
 
 module.exports = new MediaController( mediaService );

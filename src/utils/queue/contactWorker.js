@@ -71,6 +71,8 @@ const waitForDB = async () => {
             let totalSkipped = 0;
 
             //  NEW: batch cache by company (performance fix)
+            //  Map() object, a collection of key-value pairs that maintains the original insertion order
+            // we create a memory box
             const batchCompanyMap = new Map();
 
             const processContact = async (row) => {
@@ -85,6 +87,7 @@ const waitForDB = async () => {
 
                 if (!contact.name || !contact.email) return;
 
+                // Check for exact duplicate normalizedEmail in DB
                 const existing = await ContactModel.findOne({
                     normalizedEmail: contact.normalizedEmail
                 });
@@ -95,11 +98,18 @@ const waitForDB = async () => {
                     return;
                 }
 
+                // Get similar contacts from DB (same company)
                 const similarContactsFromDB = await ContactModel.find({
                     company: contact.company
                 }).limit(50);
 
+                // Get already processed contacts in current batch (same company)
                 const similarContactsFromBatch = batchCompanyMap.get(contact.company) || [];
+
+
+                // Every time you process a contact, you need to compare it with:
+                // existing DB contacts
+                // AND recently processed contacts (in same batch)
 
                 const result = getMatchResult(contact, [
                     ...similarContactsFromDB,
@@ -133,12 +143,22 @@ const waitForDB = async () => {
 
                 batch.push(contact);
 
+                // quickly get all contacts of same company
+                // check duplicates faster
+                // compare within batch
+
+                // It stores -> “All contacts processed in this batch, grouped by company”
                 batchCompanyMap.set(
                     contact.company,
                     (batchCompanyMap.get(contact.company) || []).concat(contact)
                 );
+                // Google → [
+                    //   { name: "John", phone: 1234, company: "Google" },
+                    //   { name: "Alice", phone: 9498, company: "Google" }
+                    // ]
 
                 console.log(" CURRENT BATCH SIZE:", batch.length);
+
                 if (batch.length >= BATCH_SIZE) {
 
                     const resultDB = await ContactModel.bulkWrite(

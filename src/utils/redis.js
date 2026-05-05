@@ -7,6 +7,8 @@ const redisConnectionOptions = {
     host: process.env.REDIS_HOST,
     port: process.env.REDIS_PORT,
     password: process.env.REDIS_PASSWORD,
+
+    // avoid timeout errors in BullMQ
     maxRetriesPerRequest: null
 };
 
@@ -14,15 +16,18 @@ class RedisManager {
     constructor() {
         this.client = new Redis(redisConnectionOptions);
 
+        // Runs when Redis connects successfully
         this.client.on('connect', () => {
             console.log('✅ Redis Connected');
         });
 
+        // Runs on Redis connection errors
         this.client.on('error', (err) => {
             console.error('❌ Redis Error:', err.message);
         });
     }
 
+    // Fetch data from Redis
     async get(key) {
         try {
             const data = await this.client.get(key);
@@ -33,6 +38,7 @@ class RedisManager {
         }
     }
 
+    // Store data in Redis with optional TTL (in seconds)
     async set(key, value, ttl = 3600) {
         try {
             await this.client.set(key, JSON.stringify(value));
@@ -43,6 +49,7 @@ class RedisManager {
         }
     }
 
+    // Delete a specific key from Redis
     async delete(key) {
         try {
             await this.client.del(key);
@@ -51,17 +58,13 @@ class RedisManager {
         }
     }
 
+    // Delete multiple keys matching a pattern (e.g., "contact:list:*")
     async deleteByPattern(pattern) {
         try {
-            const stream = this.client.scanStream({
-                match: pattern,
-                count: 100
-            });
+            const keys = await this.client.keys(pattern);
 
-            for await (const keys of stream) {
-                if (keys.length) {
-                    await this.client.del(keys);
-                }
+            if (keys.length > 0) {
+                await this.client.del(keys);
             }
         } catch (err) {
             console.error('Redis Pattern Delete Error:', err.message);

@@ -4,16 +4,25 @@ const jaroWinkler = require('talisman/metrics/jaro-winkler');
 
 // -------------------- Helpers --------------------
 
+
+// "John Doe!!" → "john doe"
 const normalizeName = (name) =>
   name?.toLowerCase().replace(/[^a-z ]/g, '').trim();
 
+// "+91-98765-43210" → "919876543210"
 const normalizePhone = (phone) =>
   phone ? String(phone).replace(/\D/g, '') : null;
+
+
+// "John Michael Doe" 👉 First name → John  👉 Last name → Doe
 
 const getFirstName = (name) => name?.split(' ')[ 0 ] || '';
 const getLastName = (name) => name?.split(' ').slice(-1)[ 0 ] || '';
 
 // simple phonetic fallback (replaces Soundex)
+// Converts string into sorted letters (Helps detect similar-sounding names)
+// "bob" → "bbo"
+// "obb" → "bbo"
 const simpleHash = (str = '') =>
   str
     .toLowerCase()
@@ -22,6 +31,11 @@ const simpleHash = (str = '') =>
     .sort()
     .join('');
 
+
+// 👉 Checks:
+
+// "S" vs "Sara"
+// "Sara" vs "S"
 // detect initials (S Khan vs Sara Khan)
 const isInitialMatch = (a, b) =>
   (a.length === 1 && b.startsWith(a)) || (b.length === 1 && a.startsWith(b));
@@ -47,7 +61,9 @@ const calculateScore = (a, b) => {
 
   // fuzzy email
   if (a.email && b.email) {
+
     const emailSim = jaroWinkler(a.email, b.email);
+    
     if (emailSim >= 0.92) {
       score += 40;
       reasons.push(`fuzzy_email(${emailSim.toFixed(2)})`);
@@ -99,7 +115,8 @@ const calculateScore = (a, b) => {
 };
 
 // -------------------- Decision Engine --------------------
-
+// Based on score, decide action + confidence level
+// Compares one contact with all existing contacts
 const getMatchResult = (contact, existingList) => {
   let bestScore = 0;
   let bestReasons = [];
