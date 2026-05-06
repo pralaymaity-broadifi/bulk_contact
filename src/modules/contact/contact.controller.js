@@ -41,6 +41,10 @@ class ContactController extends CalmController {
     async getAll( req, res, next ) {
         try {
             const response = await this.service.getAll( req.query );
+
+            console.log('RAW RESPONSE:', response);
+
+            // console.log('GET ALL RESPONSE:', response);
             res.sendCalmResponse( response.data.map( x => new this.dto.GetDTO( x ) ), { 'totalCount': response.total } );
         } catch ( e ) {
             next( e );
