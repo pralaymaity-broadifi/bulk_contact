@@ -15,7 +15,11 @@ A backend system to upload large CSV/XLSX files in chunks, process them asynchro
     CSV files (stream + merge)
     XLSX files (chunk-based row parsing, no file merge)
     Automatic cleanup of temporary chunk files 
+-  Advanced search using MongoDB Atlas Search with:
 
+    Autocomplete (prefix-based name search)
+    Text search (multi-field fallback across name, email, company, phone)
+    
 
 #  Redis Integration
 
@@ -24,3 +28,4 @@ A backend system to upload large CSV/XLSX files in chunks, process them asynchro
 -  Reduce MongoDB load for repeated queries
 -  Fast response for frequently accessed data
 -  Queue-ready Redis connection (BullMQ support)
+- 
