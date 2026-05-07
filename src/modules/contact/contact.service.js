@@ -44,291 +44,434 @@ class ContactService extends CalmService {
       });
     }
 
-    // async getAll(query, ops = {}) {
+    
 
-    //     let populateFields = this.populateFields;
 
-    //     if (Array.isArray(ops.populateFields)) {
-    //         populateFields = ops.populateFields;
-    //     }
+    // async getAll(query) {
 
-    //     // =========================
-    //     // SAFE DESTRUCTURING
-    //     // =========================
-    //     const { skip, limit, sortBy, ...restQuery } = query;
+    // // =========================
+    // // DESTRUCTURE QUERY
+    // // =========================
+    // const {
+    //     skip,
+    //     limit,
+    //     sortBy,
+    //     search,
+    //     company,
+    //     duplicateStatus,
+    //     duplicateConfidence,
+    //     minScore,
+    //     maxScore,
+    //     startDate,
+    //     endDate,
+    //     ...restQuery
+    // } = query;
 
-    //     const finalSkip = skip ? Number(skip) : 0;
-    //     const finalLimit = limit ? Number(limit) : 10;
-    //     const finalSort = sortBy ? sortBy : { createdAt: -1 };
+    // const finalSkip = skip ? Number(skip) : 0;
+    // const finalLimit = limit ? Number(limit) : 10;
+    // const finalSort = sortBy ? sortBy : { createdAt: -1 };
 
-    //     // =========================
-    //     // CACHE KEY (based on query + pagination + sort)
-    //     // =========================
-    //     const cacheKey = `contact:list:${JSON.stringify({
-    //         restQuery,
-    //         skip: finalSkip,
-    //         limit: finalLimit,
-    //         sortBy: finalSort
-    //     })}`;
+    // const hasSearch = typeof search === "string" && search.trim().length > 0;
 
-    //     // =========================
-    //     // CACHE WRAPPER
-    //     // =========================
-    //     return await cacheWrapper(cacheKey, async () => {
+    // const filter = [];
 
-    //         const items = await this.model
-    //             .find(restQuery)
-    //             .sort(finalSort)
-    //             .skip(finalSkip)
-    //             .limit(finalLimit)
-    //             .populate(populateFields);
-
-    //         const total = await this.model.countDocuments(restQuery);
-
-    //         return {
-    //             data: this.parseObj(items),
-    //             total
-                
-    //         };
+    // // =========================
+    // // FILTERS
+    // // =========================
+    // if (company) {
+    //     filter.push({
+    //         text: {
+    //             query: company,
+    //             path: "company"
+    //         }
     //     });
     // }
 
+    // if (duplicateStatus) {
+    //     filter.push({
+    //         equals: {
+    //             path: "duplicateStatus",
+    //             value: duplicateStatus
+    //         }
+    //     });
+    // }
+
+    // if (duplicateConfidence) {
+    //     filter.push({
+    //         equals: {
+    //             path: "duplicateConfidence",
+    //             value: duplicateConfidence
+    //         }
+    //     });
+    // }
+
+    // if (minScore !== undefined || maxScore !== undefined) {
+    //     filter.push({
+    //         range: {
+    //             path: "duplicateScore",
+    //             gte: minScore ? Number(minScore) : 0,
+    //             lte: maxScore ? Number(maxScore) : 100
+    //         }
+    //     });
+    // }
+
+    // if (startDate || endDate) {
+    //     const start = startDate ? new Date(startDate) : new Date("1970-01-01");
+    //     const end = endDate ? new Date(endDate) : new Date();
+    //     end.setHours(23, 59, 59, 999);
+
+    //     filter.push({
+    //         range: {
+    //             path: "createdAt",
+    //             gte: start,
+    //             lte: end
+    //         }
+    //     });
+    // }
+
+    // // =========================
+    // // CACHE KEY
+    // // =========================
+    // const cacheKey = `contact:list:${JSON.stringify({
+    //     query,
+    //     skip: finalSkip,
+    //     limit: finalLimit
+    // })}`;
+
+    // // =========================
+    // // EXECUTION
+    // // =========================
+    // return await cacheWrapper(cacheKey, async () => {
+
+    //     const pipeline = [];
+
+    //     // =========================
+    //     // ATLAS SEARCH STAGE
+    //     // =========================
+    //     let searchStage = null;
+
+    //     if (hasSearch || filter.length > 0) {
+
+    //         searchStage = {
+    //             compound: {
+    //                 filter
+    //             }
+    //         };
+
+    //         if (hasSearch) {
+    //             searchStage.compound.should = [
+    //                 {
+    //                     autocomplete: {
+    //                         query: search,
+    //                         path: "name",
+    //                         score: { boost: { value: 10 } }
+    //                     }
+    //                 },
+    //                 {
+    //                     text: {
+    //                         query: search,
+    //                         path: [ "email", "company", "phone" ]
+    //                     }
+    //                 }
+    //             ];
+
+    //             searchStage.compound.minimumShouldMatch = 1;
+    //         }
+    //     }
+
+    //     if (searchStage) {
+    //         pipeline.push({ $search: searchStage });
+    //     }
+
+    //     // =========================
+    //     // EXTRA FILTERS
+    //     // =========================
+    //     if (Object.keys(restQuery).length > 0) {
+    //         pipeline.push({ $match: restQuery });
+    //     }
+
+    //     // =========================
+    //     // SORT + PAGINATION
+    //     // =========================
+    //     pipeline.push(
+    //         { $sort: finalSort },
+    //         { $skip: finalSkip },
+    //         { $limit: finalLimit }
+    //     );
+
+    //     const items = await this.model.aggregate(pipeline);
+
+    //     // =========================
+    //     // COUNT PIPELINE
+    //     // =========================
+    //     const countPipeline = [];
+
+    //     let countSearchStage = null;
+
+    //     if (hasSearch || filter.length > 0) {
+
+    //         countSearchStage = {
+    //             compound: {
+    //                 filter
+    //             }
+    //         };
+
+    //         if (hasSearch) {
+    //             countSearchStage.compound.should = [
+    //                 {
+    //                     autocomplete: {
+    //                         query: search,
+    //                         path: "name"
+    //                     }
+    //                 },
+    //                 {
+    //                     text: {
+    //                         query: search,
+    //                         path: [ "email", "company", "phone" ]
+    //                     }
+    //                 }
+    //             ];
+
+    //             countSearchStage.compound.minimumShouldMatch = 1;
+    //         }
+    //     }
+
+    //     if (countSearchStage) {
+    //         countPipeline.push({ $search: countSearchStage });
+    //     }
+
+    //     countPipeline.push({ $count: "total" });
+
+    //     const countResult = await this.model.aggregate(countPipeline);
+    //     const total = countResult[ 0 ]?.total || 0;
+
+    //     return {
+    //         data: this.parseObj(items),
+    //         total
+    //     };
+    // });
+    // }
 
     async getAll(query) {
 
-        // =========================
-        // DESTRUCTURE QUERY
-        // =========================
-        const {
-            skip,
-            limit,
-            sortBy,
-            search,
-            company,
-            duplicateStatus,
-            duplicateConfidence,
-            minScore,
-            maxScore,
-            startDate,
-            endDate,
-            ...restQuery
-        } = query;
+    // =========================
+    // DESTRUCTURE QUERY
+    // =========================
+    const {
+        skip,
+        limit,
+        search,
+        company,
+        duplicateStatus,
+        duplicateConfidence,
+        minScore,
+        maxScore,
+        startDate,
+        endDate,
+        ...restQuery
+    } = query;
 
-        const finalSkip = skip ? Number(skip) : 0;
-        const finalLimit = limit ? Number(limit) : 10;
+    const finalSkip = skip ? Number(skip) : 0;
+    const finalLimit = limit ? Number(limit) : 10;
 
-        // default sort (Mongo aggregation style)
-        const finalSort = sortBy ? sortBy : { createdAt: -1 };
+    const hasSearch = typeof search === "string" && search.trim().length > 0;
 
-        // =========================
-        // BUILD SEARCH CONDITIONS
-        // =========================
-        const must = [];
-        const filter = [];
-
-        // FULL TEXT SEARCH
-        if (search) {
-            must.push({
-                text: {
-                    query: search,
-                    path: [ "name", "email", "company", "phone" ]
-                }
-            });
-        }
-
-        
-
-        // FILTERS
-        if (company) {
-            filter.push({
-                text: {
-                    query: company,
-                    path: "company"
-                }
-            });
-        }
-
-        if (duplicateStatus) {
-            filter.push({
-                equals: {
-                    path: "duplicateStatus",
-                    value: duplicateStatus
-                }
-            });
-        }
-
-        if (duplicateConfidence) {
-            filter.push({
-                equals: {
-                    path: "duplicateConfidence",
-                    value: duplicateConfidence
-                }
-            });
-        }
-
-        //  SCORE RANGE
-        if (minScore !== undefined || maxScore !== undefined) {
-            filter.push({
-                range: {
-                    path: "duplicateScore",
-                    gte: minScore ? Number(minScore) : 0,
-                    lte: maxScore ? Number(maxScore) : 100
-                }
-            });
-        }
-
-        //  DATE RANGE
-        if (startDate || endDate) {
-
-            const start = startDate ? new Date(startDate) : new Date("1970-01-01");
-
-            const end = endDate ? new Date(endDate) : new Date();
-
-            // Important: include full end day till 23:59:59.999
-            end.setHours(23, 59, 59, 999);
-
-            filter.push({
-                range: {
-                    path: "createdAt",
-                    gte: start,
-                    lte: end
-                }
-            });
-        }
-
-        // =========================
-        // CACHE KEY
-        // =========================
-        const cacheKey = `contact:list:${JSON.stringify({
-            query,
-            skip: finalSkip,
-            limit: finalLimit
-        })}`;
-
-        // =========================
-        // EXECUTION
-        // =========================
-        return await cacheWrapper(cacheKey, async () => {
-
-    const pipeline = [];
+    const filter = [];
 
     // =========================
-    // MAIN ATLAS SEARCH STAGE (UPDATED)
+    // FILTERS
     // =========================
-    if (search?.trim() || must.length > 0 || filter.length > 0) {
+    if (company) {
+        filter.push({
+            text: {
+                query: company,
+                path: "company"
+            }
+        });
+    }
 
-        pipeline.push({
+    if (duplicateStatus) {
+        filter.push({
+            equals: {
+                path: "duplicateStatus",
+                value: duplicateStatus
+            }
+        });
+    }
 
-            // Use Atlas Search engine for searching instead of normal filtering
-            $search: {
+    if (duplicateConfidence) {
+        filter.push({
+            equals: {
+                path: "duplicateConfidence",
+                value: duplicateConfidence
+            }
+        });
+    }
 
-                // This means: I want to combine multiple search rules together
-                compound: {
+    if (minScore !== undefined || maxScore !== undefined) {
+        filter.push({
+            range: {
+                path: "duplicateScore",
+                gte: minScore ? Number(minScore) : 0,
+                lte: maxScore ? Number(maxScore) : 100
+            }
+        });
+    }
 
-                    // This means:Try all these options, and rank results based on how well they match
-                    should: [
+    if (startDate || endDate) {
+        const start = startDate ? new Date(startDate) : new Date("1970-01-01");
+        const end = endDate ? new Date(endDate) : new Date();
+        end.setHours(23, 59, 59, 999);
 
-                        //  This enables: “prefix matching search”
-                        {
-                            autocomplete: {
-                                query: search,
-                                path: "name",
-                                // Make this match 10x more important than others
-                                score: { boost: { value: 10 } }
-                            }
-                        },
-
-                        // FALLBACK: normal full-text search
-                        {
-                            text: {
-                                query: search,
-                                path: [ "name", "email", "company", "phone" ]
-                            }
-                        }
-                    ],
-
-                    minimumShouldMatch: 1,
-                    // existing filters still apply
-                    must: must,
-                    filter: filter
-                }
+        filter.push({
+            range: {
+                path: "createdAt",
+                gte: start,
+                lte: end
             }
         });
     }
 
     // =========================
-    // REST QUERY FILTER
+    // CACHE KEY
     // =========================
-    if (Object.keys(restQuery).length > 0) {
-        pipeline.push({
-            $match: restQuery
-        });
-    }
+    const cacheKey = `contact:list:${JSON.stringify({
+        query,
+        skip: finalSkip,
+        limit: finalLimit
+    })}`;
 
-    // =========================
-    // SORT
-    // =========================
-    pipeline.push({
-        $sort: finalSort
-    });
+    return await cacheWrapper(cacheKey, async () => {
 
-    // =========================
-    // PAGINATION
-    // =========================
-    pipeline.push(
-        { $skip: finalSkip },
-        { $limit: finalLimit }
-    );
+        const pipeline = [];
 
-    // =========================
-    // DATA QUERY
-    // =========================
-    const items = await this.model.aggregate(pipeline);
+        // =========================
+        // ATLAS SEARCH STAGE
+        // =========================
+        if (hasSearch || filter.length > 0) {
 
-    // =========================
-    // COUNT PIPELINE (SAME LOGIC)
-    // =========================
-    const countPipeline = [];
-
-    if (search?.trim() || must.length > 0 || filter.length > 0) {
-        countPipeline.push({
-            $search: {
+            const searchStage = {
                 compound: {
-                    should: [
-                        {
-                            autocomplete: {
-                                query: search,
-                                path: "name",
-                            }
-                        },
-                        {
-                            text: {
-                                query: search,
-                                path: [ "name", "email", "company", "phone" ]
-                            }
-                        }
-                    ],
-                    minimumShouldMatch: 1,
-                    must,
                     filter
                 }
+            };
+
+            if (hasSearch) {
+                searchStage.compound.should = [
+                    {
+                        autocomplete: {
+                            query: search,
+                            path: "name",
+                            score: { boost: { value: 10 } }
+                        }
+                    },
+                    {
+                        text: {
+                            query: search,
+                            path: [ "email", "company", "phone" ]
+                        }
+                    }
+                ];
+
+                searchStage.compound.minimumShouldMatch = 1;
+            }
+
+            // =========================
+            // ADD SCORE (IMPORTANT)
+            // =========================
+            pipeline.push({
+                $search: searchStage
+            });
+        }
+
+        // =========================
+        // REST FILTERS
+        // =========================
+        if (Object.keys(restQuery).length > 0) {
+            pipeline.push({ $match: restQuery });
+        }
+
+        // =========================
+        // ADD SCORE FIELD (VERY IMPORTANT)
+        // =========================
+
+        // This will brings the data according to correct match order
+        pipeline.push({
+            $addFields: {
+                score: { $meta: "searchScore" }
             }
         });
-    }
 
-    countPipeline.push({
-        $count: "total"
+        // =========================
+        // SORT BY SCORE (FIX)
+        // =========================
+        pipeline.push({
+            $sort: {
+                score: -1
+            }
+        });
+
+        // =========================
+        // PAGINATION
+        // =========================
+        pipeline.push(
+            { $skip: finalSkip },
+            { $limit: finalLimit }
+        );
+
+        // =========================
+        // DATA
+        // =========================
+        const items = await this.model.aggregate(pipeline);
+
+        // =========================
+        // COUNT PIPELINE
+        // =========================
+        const countPipeline = [];
+
+        if (hasSearch || filter.length > 0) {
+
+            const countSearchStage = {
+                compound: {
+                    filter
+                }
+            };
+
+            if (hasSearch) {
+                countSearchStage.compound.should = [
+                    {
+                        autocomplete: {
+                            query: search,
+                            path: "name"
+                        }
+                    },
+                    {
+                        text: {
+                            query: search,
+                            path: [ "email", "company", "phone" ]
+                        }
+                    }
+                ];
+
+                countSearchStage.compound.minimumShouldMatch = 1;
+            }
+
+            countPipeline.push({
+                $search: countSearchStage
+            });
+        }
+
+        countPipeline.push({ $count: "total" });
+
+        const countResult = await this.model.aggregate(countPipeline);
+        const total = countResult[ 0 ]?.total || 0;
+
+        return {
+            data: this.parseObj(items),
+            total
+        };
     });
-
-    const countResult = await this.model.aggregate(countPipeline);
-    const total = countResult[ 0 ]?.total || 0;
-
-    return {
-        data: this.parseObj(items),
-        total
-    };
-});
-    }
+}
 
     
 
