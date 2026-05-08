@@ -3,6 +3,9 @@ const { CalmController } = require( '../../../system/core/CalmController' );
 const { ContactService } = require( './contact.service' );
 const { Contact } = require( './contact.model' );
 const contactDTO = require( './contact.dto' );
+const path = require("path");
+
+
 const autoBind = require( 'auto-bind' ),
     contactService = new ContactService(
         new Contact().getInstance()
@@ -18,21 +21,48 @@ class ContactController extends CalmController {
 
     async processFile(req, res, next) {
         try {
-            const { fileKey } = req.body;
 
-            if (!fileKey) {
-                throw new Error("fileKey is required");
-            }
+            const { filePath } = req.body;
 
-            // Call service
-            const response = await this.service.processFile(fileKey);
+            // convert to absolute path (IMPORTANT FIX)
+            const absoluteFilePath = path.join(process.cwd(), filePath);
 
-            res.send(response);
+            const result = await this.service.processFile(
+            absoluteFilePath
+            );
+
+            res.send(result);
 
         } catch (e) {
             next(e);
         }
     }
+
+    async getAll( req, res, next ) {
+        try {
+            const response = await this.service.getAll( req.query );
+
+            // console.log('RAW RESPONSE:', response);
+
+            // console.log('GET ALL RESPONSE:', response);
+            res.sendCalmResponse( response.data.map( x => new this.dto.GetDTO( x ) ), { 'totalCount': response.total } );
+        } catch ( e ) {
+            next( e );
+        }
+    }
+
+    async get( req, res, next ) {
+        const { id } = req.params;
+
+        try {
+            const response = await this.service.get( id );
+
+            res.sendCalmResponse( new this.dto.GetDTO( response.data ) );
+        } catch ( e ) {
+            next( e );
+        }
+    }
+
 
 }
 

@@ -123,3 +123,12 @@ dist
 .vscode
 .idea
 package-lock.json
+
+
+
+
+.uploads
+chunk0.csv
+chunk1.csv
+chunk2.csv
+chunk3.csv       
