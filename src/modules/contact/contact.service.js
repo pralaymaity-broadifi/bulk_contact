@@ -2,11 +2,11 @@
 const { CalmService } = require( '../../../system/core/CalmService' );
 // const fs = require("fs");
 // const csv = require("csv-parser");
-const contactQueue = require('../../utils/queue/contactQueue');
-const jobTrackingStore = require("../../utils/queue/jobTrackingStore");
+// const contactQueue = require('../../utils/queue/contactQueue');
+// const jobTrackingStore = require("../../utils/queue/jobTrackingStore");
 const cacheWrapper = require('../../utils/cache/cacheWrapper');
 
-const path = require("path");
+// const path = require("path");
 
 
 
@@ -346,13 +346,17 @@ class ContactService extends CalmService {
         const pipeline = [];
 
         // =========================
-        // ATLAS SEARCH STAGE
+        // MONGODB ATLAS SEARCH STAGE (Not mongo query stage)
         // =========================
         if (hasSearch || filter.length > 0) {
 
+            // This object will later become: $search query
             const searchStage = {
+
+                // compound means : Combine multiple search conditions together
                 compound: {
-                    filter
+                    // THIS filter key is MongoDB Atlas built-in keyword.
+                    filter: filter
                 }
             };
 
@@ -373,6 +377,7 @@ class ContactService extends CalmService {
                     }
                 ];
 
+                // At least ONE should condition must match
                 searchStage.compound.minimumShouldMatch = 1;
             }
 
@@ -477,30 +482,30 @@ class ContactService extends CalmService {
 
   
 
-  async processFile(filePath) {
+//   async processFile(filePath) {
 
-    console.log("SENDING TO QUEUE ====");
+//     console.log("SENDING TO QUEUE ====");
 
-    let absoluteFilePath = filePath;
+//     let absoluteFilePath = filePath;
 
-    // ONLY convert if it's NOT absolute
-    if (!path.isAbsolute(filePath)) {
-      absoluteFilePath = path.resolve(filePath);
-    }
+//     // ONLY convert if it's NOT absolute
+//     if (!path.isAbsolute(filePath)) {
+//       absoluteFilePath = path.resolve(filePath);
+//     }
 
-    const job = await contactQueue.add('process-contacts', {
-      filePath: absoluteFilePath
-    });
+//     const job = await contactQueue.add('process-contacts', {
+//       filePath: absoluteFilePath
+//     });
 
-    // console.log("JOB CREATED WITH ID:=========", job);
+//     // console.log("JOB CREATED WITH ID:=========", job);
 
-    jobTrackingStore.create(job.id);
+//     jobTrackingStore.create(job.id);
 
-    return {
-      jobId: job.id,
-      message: "Processing started"
-    };
-  }
+//     return {
+//       jobId: job.id,
+//       message: "Processing started"
+//     };
+//   }
 }
 
 module.exports = { ContactService };
